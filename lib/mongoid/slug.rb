@@ -22,9 +22,6 @@ module Mongoid
                      :slug_history,
                      :slug_by_model_type,
                      :slug_max_length
-
-      # field :_slugs, type: Array, default: [], localize: false
-      # alias_attribute :slugs, :_slugs
     end
 
     class << self
@@ -33,7 +30,7 @@ module Mongoid
         instance_eval(&block)
       end
 
-      def slug(&block)
+      def slug_method(&block)
         @default_slug = block if block_given?
       end
     end
@@ -71,7 +68,7 @@ module Mongoid
       #     end
       #   end
       #
-      def slug(*fields, &block)
+      def slug_method(*fields, &block)
         options = fields.extract_options!
 
         self.slug_scope            = options[:scope]
@@ -81,11 +78,12 @@ module Mongoid
         self.slug_by_model_type    = options[:by_model_type]
         self.slug_max_length       = options.key?(:max_length) ? options[:max_length] : MONGO_INDEX_KEY_LIMIT_BYTES - 32
 
-        field :_slugs, type: Array, localize: options[:localize]
-        alias_attribute :slugs, :_slugs
+        field :slug
+        # alias_attribute :slug, :_slug
+        field :slug_lower
 
         # Set index
-        index(*Mongoid::Slug::Index.build_index(slug_scope_key, slug_by_model_type)) unless embedded?
+        # index(*Mongoid::Slug::Index.build_index(slug_scope_key, slug_by_model_type)) unless embedded?
 
         self.slug_url_builder = block_given? ? block : default_slug_url_builder
 
@@ -160,19 +158,7 @@ module Mongoid
     #
     # @return [true]
     def build_slug
-      if localized?
-        begin
-          orig_locale = I18n.locale
-          all_locales.each do |target_locale|
-            I18n.locale = target_locale
-            apply_slug
-          end
-        ensure
-          I18n.locale = orig_locale
-        end
-      else
-        apply_slug
-      end
+      apply_slug
       true
     end
 
@@ -183,14 +169,7 @@ module Mongoid
       # to find document instead
       return true if new_slug.size.zero?
 
-      # avoid duplicate slugs
-      _slugs.delete(new_slug) if _slugs
-
-      if !!slug_history && _slugs.is_a?(Array)
-        append_slug(new_slug)
-      else
-        self._slugs = [new_slug]
-      end
+      self.slug = new_slug
     end
 
     # Builds slug then atomically sets it in the database.
@@ -199,7 +178,7 @@ module Mongoid
     # Mongoid 3 (two args) and Mongoid 4 (hash arg)
     def set_slug!
       build_slug
-      method(:set).arity == 1 ? set(_slugs: _slugs) : set(:_slugs, _slugs)
+      set(slug: slug)
     end
 
     # Atomically unsets the slug field in the database. It is important to unset
@@ -207,18 +186,18 @@ module Mongoid
     #
     # This also resets the in-memory value of the slug field to its default (empty array)
     def unset_slug!
-      unset(:_slugs)
+      unset(:slug)
       clear_slug!
     end
 
     # Rolls back the slug value from the Mongoid changeset.
     def reset_slug!
-      reset__slugs!
+      reset_slugs!
     end
 
     # Sets the slug to its default value.
     def clear_slug!
-      self._slugs = []
+      self.slug = nil
     end
 
     # Finds a unique slug, were specified string used to generate a slug.
@@ -233,7 +212,7 @@ module Mongoid
 
     # @return [Boolean] Whether the slug requires to be rebuilt
     def slug_should_be_rebuilt?
-      new_record? || _slugs_changed? || slugged_attributes_changed?
+      new_record? || slug_changed? || slugged_attributes_changed?
     end
 
     def slugged_attributes_changed?
@@ -246,17 +225,11 @@ module Mongoid
       slug || super
     end
 
-    # @return [String] the slug, or nil if the document does not have a slug.
-    def slug
-      return _slugs.last if _slugs
-      _id.to_s
-    end
-
     def slug_builder
       cur_slug = nil
       if new_with_slugs? || persisted_with_slug_changes?
         # user defined slug
-        cur_slug = _slugs.last
+        cur_slug = slug
       end
       # generate slug if the slug is not user defined or does not exist
       cur_slug || pre_slug_string
@@ -264,61 +237,14 @@ module Mongoid
 
     private
 
-    def append_slug(value)
-      if localized?
-        # This is necessary for the scenario in which the slugged locale is not yet present
-        # but the default locale is. In this situation, self._slugs falls back to the default
-        # which is undesired
-        current_slugs = _slugs_translations.fetch(I18n.locale.to_s, [])
-        current_slugs << value
-        self._slugs_translations = _slugs_translations.merge(I18n.locale.to_s => current_slugs)
-      else
-        _slugs << value
-      end
-    end
-
     # Returns true if object is a new record and slugs are present
     def new_with_slugs?
-      if localized?
-        # We need to check if slugs are present for the locale without falling back
-        # to a default
-        new_record? && _slugs_translations.fetch(I18n.locale.to_s, []).any?
-      else
-        new_record? && _slugs.present?
-      end
+      new_record? && slug.present?
     end
 
     # Returns true if object has been persisted and has changes in the slug
     def persisted_with_slug_changes?
-      if localized?
-        changes = _slugs_change
-        return (persisted? && false) if changes.nil?
-
-        # ensure we check for changes only between the same locale
-        original = changes.first.try(:fetch, I18n.locale.to_s, nil)
-        compare = changes.last.try(:fetch, I18n.locale.to_s, nil)
-        persisted? && original != compare
-      else
-        persisted? && _slugs_changed?
-      end
-    end
-
-    def localized?
-      fields['_slugs'].options[:localize]
-    rescue StandardError
-      false
-    end
-
-    # Return all possible locales for model
-    # Avoiding usage of I18n.available_locales in case the user hasn't set it properly, or is
-    # doing something crazy, but at the same time we need a fallback in case the model doesn't
-    # have any localized attributes at all (extreme edge case).
-    def all_locales
-      locales = slugged_attributes
-                .map { |attr| send("#{attr}_translations").keys if respond_to?("#{attr}_translations") }
-                .flatten.compact.uniq
-      locales = I18n.available_locales if locales.empty?
-      locales
+      persisted? && slug_changed?
     end
 
     def pre_slug_string

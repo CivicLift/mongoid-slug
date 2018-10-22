@@ -75,20 +75,8 @@ module Mongoid
         true
       end
 
-      def for_slugs(slugs)
-        # _translations
-        localized = (begin
-                       @klass.fields['_slugs'].options[:localize]
-                     rescue StandardError
-                       false
-                     end)
-        if localized
-          def_loc = I18n.default_locale
-          query = { '$in' => slugs }
-          where({ '$or' => [{ _slugs: query }, { "_slugs.#{def_loc}" => query }] }).limit(slugs.length)
-        else
-          where(_slugs: { '$in' => slugs }).limit(slugs.length)
-        end
+      def for_slugs(slug)
+        where(slug: slug)
       end
 
       def execute_or_raise_for_slugs(slugs, multi)

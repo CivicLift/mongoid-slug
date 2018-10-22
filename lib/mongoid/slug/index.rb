@@ -11,7 +11,7 @@ module Mongoid
         fields = {}
         fields[:_type] = 1       if by_model_type
         fields[scope_key] = 1 if scope_key
-        fields[:_slugs] = 1
+        fields[:slug] = 1
 
         # By design, we use the unique index constraint when possible to enforce slug uniqueness.
         # When migrating legacy data to Mongoid slug, the _slugs field may be null on many records,

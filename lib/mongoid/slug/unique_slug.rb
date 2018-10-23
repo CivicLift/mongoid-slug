@@ -9,7 +9,7 @@ module Mongoid
         attr_reader :last_entered_slug, :existing_slugs, :existing_history_slugs, :sorted_existing
 
         def initialize(slug, documents, pattern)
-          @slug = slug
+          @slug = slug.downcase
           @documents = documents
           @pattern = pattern
           @last_entered_slug = []
@@ -18,7 +18,7 @@ module Mongoid
           @sorted_existing = []
           regexp_pattern = Regexp.new(@pattern)
           @documents.each do |doc|
-            history_slugs = [doc.slug]
+            history_slugs = [doc.slug_lower]
             next if history_slugs.nil?
             existing_slugs.push(*history_slugs.find_all { |cur_slug| cur_slug =~ regexp_pattern })
             last_entered_slug.push(*history_slugs.last) if history_slugs.last =~ regexp_pattern
@@ -94,7 +94,7 @@ module Mongoid
           @_slug = @_slug[0...slug_max_length] if slug_max_length
 
           where_hash = {}
-          where_hash[:slug] = regex_for_slug
+          where_hash[:slug_lower] = regex_for_slug
           where_hash[:_id.ne]     = model._id
 
           if (scope = slug_scope) && reflect_on_association(scope).nil?
@@ -124,7 +124,7 @@ module Mongoid
       end
 
       def escaped_pattern
-        "^#{Regexp.escape(@_slug)}(?:-(\\d+))?$"
+        "^#{Regexp.escape(@_slug.downcase)}(?:-(\\d+))?$"
       end
 
       # Regular expression that matches slug, slug-1, ... slug-n

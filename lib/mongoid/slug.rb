@@ -164,18 +164,13 @@ module Mongoid
 
     def apply_slug
       new_slug = find_unique_slug
-
-      # skip slug generation and use Mongoid id
-      # to find document instead
       return true if new_slug.size.zero?
 
+      self.slug_lower = new_slug.downcase
       self.slug = new_slug
     end
 
     # Builds slug then atomically sets it in the database.
-    #
-    # This method is adapted to use the :set method variants from both
-    # Mongoid 3 (two args) and Mongoid 4 (hash arg)
     def set_slug!
       build_slug
       set(slug: slug)
